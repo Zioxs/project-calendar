@@ -46,7 +46,11 @@ export default function Dashboard() {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     
     if (mode === 'live') {
-      setGeneratedUrl(`${origin}/api/og?source=google`);
+      if (session?.user?.id) {
+        setGeneratedUrl(`${origin}/api/og?userId=${session.user.id}&startDate=${formatDateForQuery(startDate)}`);
+      } else {
+        setGeneratedUrl(`${origin}/api/og?userId=YOUR_USER_ID&startDate=${formatDateForQuery(startDate)}`);
+      }
       return;
     }
 
@@ -97,7 +101,10 @@ export default function Dashboard() {
       <div className="w-full max-w-4xl bg-[#1e1e1e] p-6 md:p-10 rounded-xl shadow-2xl">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
           <div className="flex items-center gap-6">
-            <h1 className="text-3xl font-medium text-gray-50 tracking-wide">Builder</h1>
+            <div className="flex items-center gap-3">
+              <img src="/logo.png" alt="Logo" className="w-9 h-9 rounded-lg object-cover" />
+              <h1 className="text-3xl font-medium text-gray-50 tracking-wide">Project Calendar</h1>
+            </div>
             <div className="flex bg-[#262626] rounded-lg p-1 shadow-inner">
               <button 
                 onClick={() => setMode('manual')}
@@ -192,8 +199,8 @@ export default function Dashboard() {
           <div className="mb-10 p-8 bg-[#262626] rounded-xl border border-[#333333] text-center shadow-inner">
             {session ? (
               <div className="text-gray-300">
-                <p className="mb-3 text-lg font-medium text-[#ce93d8]">Your image URL is now permanently linked to your Google Tasks.</p>
-                <p className="text-sm text-gray-400">Every time the URL is loaded, it will securely fetch your active tasks and automatically update the preview!</p>
+                <p className="mb-3 text-lg font-medium text-[#ce93d8]">Your unique public image URL is ready.</p>
+                <p className="text-sm text-gray-400">This URL is tied to your account. You can embed it anywhere (GitHub, Discord, etc.) and it will always securely fetch your active tasks without requiring the viewer to log in!</p>
               </div>
             ) : (
               <div className="text-[#ffb74d]">

@@ -2,7 +2,7 @@ import { ImageResponse } from 'next/og';
 import { NextRequest } from 'next/server';
 import fs from 'fs';
 import path from 'path';
-import { auth } from '@/auth';
+import { prisma } from '@/lib/prisma';
 import { google } from 'googleapis';
 
 export const runtime = 'nodejs';
@@ -25,6 +25,10 @@ const THEME = {
 const fontPath = path.join(process.cwd(), 'public', 'fonts', 'JetBrainsMono-Medium.ttf');
 const fontData = fs.existsSync(fontPath) ? fs.readFileSync(fontPath) : null;
 
+// Global Logo Loading
+const logoPath = path.join(process.cwd(), 'public', 'logo.png');
+const logoData = fs.existsSync(logoPath) ? `data:image/png;base64,${fs.readFileSync(logoPath).toString('base64')}` : null;
+
 const parseDate = (s: string) => {
     const [d, m, y] = s.split('-').map(Number);
     return new Date(y, m - 1, d);
@@ -33,24 +37,29 @@ const parseDate = (s: string) => {
 export async function GET(req: NextRequest) {
     try {
         const { searchParams } = new URL(req.url);
-        const source = searchParams.get('source');
+        const userId = searchParams.get('userId');
 
         let startDateStr = searchParams.get('startDate') || '01-04-2026';
         let startObj = parseDate(startDateStr);
+        let projectStartObj = new Date(startObj); // Used specifically for progress percentage
 
         const goalMap: Record<string, any> = {};
         const goalsList: any[] = [];
 
-        if (source === 'google') {
-            const session = await auth();
-            // @ts-ignore
-            const accessToken = session?.accessToken;
-            if (!session || !accessToken) {
-                return new Response("Not authenticated or missing access token. Please view this URL in a browser where you are logged in.", { status: 401 });
+        if (userId) {
+            const account = await prisma.account.findFirst({
+                where: { userId: userId, provider: 'google' }
+            });
+
+            if (!account || !account.refresh_token) {
+                return new Response("Not authenticated or missing refresh token.", { status: 401 });
             }
 
-            const oauth2Client = new google.auth.OAuth2();
-            oauth2Client.setCredentials({ access_token: accessToken as string });
+            const oauth2Client = new google.auth.OAuth2(
+                process.env.AUTH_GOOGLE_ID,
+                process.env.AUTH_GOOGLE_SECRET
+            );
+            oauth2Client.setCredentials({ refresh_token: account.refresh_token });
             const tasksService = google.tasks({ version: "v1", auth: oauth2Client });
             
             const response = await tasksService.tasks.list({
@@ -82,10 +91,19 @@ export async function GET(req: NextRequest) {
                     title: task.title || "Untitled Task",
                     dateStr: dStr,
                     dateObj: dateObj,
-                    color: color
+                    color: color,
+                    position: task.position || ""
                 };
                 goalMap[dStr] = g;
                 goalsList.push(g);
+            });
+
+            // Sort tasks to match chronological order (closest due date first), falling back to Google Tasks position
+            goalsList.sort((a, b) => {
+                if (a.dateObj.getTime() !== b.dateObj.getTime()) {
+                    return a.dateObj.getTime() - b.dateObj.getTime();
+                }
+                return a.position.localeCompare(b.position);
             });
         } else {
             let i = 0;
@@ -104,6 +122,7 @@ export async function GET(req: NextRequest) {
 
         const today = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
         today.setHours(0, 0, 0, 0);
+        const todayStr = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
 
         let endObj = new Date(startObj);
         if (goalsList.length) {
@@ -111,10 +130,23 @@ export async function GET(req: NextRequest) {
             endObj = new Date(Math.max(...timeStamps));
         }
 
-        // 1. Generate Days
+        // We want the total number of days (dots) to be a perfect multiple of 7 (full rows).
+        // We also want a minimum of 14 days. This keeps the visual grid perfectly aligned.
+        const diffTime = endObj.getTime() - startObj.getTime();
+        const diffDays = Math.max(0, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+        const currentDots = diffDays + 1;
+        
+        const targetDots = Math.max(14, Math.ceil(currentDots / 7) * 7);
+        
+        // Always anchor the start date relative to the end date to guarantee the last dot is exactly endObj
+        // and that we bypass any timezone-midnight truncation bugs.
+        startObj = new Date(endObj);
+        startObj.setDate(startObj.getDate() - (targetDots - 1));
+
+        // 1. Generate exactly targetDots days
         const allDays = [];
         let curr = new Date(startObj);
-        while (curr <= endObj) {
+        for (let i = 0; i < targetDots; i++) {
             allDays.push({
                 dayNum: curr.getDate(),
                 timestamp: curr.getTime(),
@@ -166,7 +198,7 @@ export async function GET(req: NextRequest) {
                         {weeks.map((week, wIdx) => (
                             <div key={wIdx} style={{ display: 'flex', gap: `${gap}px` }}>
                                 {week.map((day, dIdx) => {
-                                    const isToday = day.timestamp === today.getTime();
+                                    const isToday = day.dateStr === todayStr;
                                     const goalMatch = goalMap[day.dateStr];
                                     return (
                                         <div key={dIdx} style={{
@@ -208,8 +240,8 @@ export async function GET(req: NextRequest) {
                             boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
                         }}>
                             {visibleGoals.map((g, idx) => {
-                                const total = g.dateObj.getTime() - startObj.getTime();
-                                const elapsed = today.getTime() - startObj.getTime();
+                                const total = g.dateObj.getTime() - projectStartObj.getTime();
+                                const elapsed = today.getTime() - projectStartObj.getTime();
                                 const percent = total > 0 ? Math.min(100, Math.max(0, Math.floor((elapsed / total) * 100))) : (elapsed >= 0 ? 100 : 0);
 
                                 return (
@@ -234,9 +266,30 @@ export async function GET(req: NextRequest) {
                             })}
                         </div>
                     )}
+
+                    {/* Bottom Logo */}
+                    {logoData && (
+                        <div style={{ display: 'flex', justifyContent: 'center', marginTop: '60px' }}>
+                            <img
+                                src={logoData}
+                                width={56}
+                                height={56}
+                                style={{ borderRadius: '14px', objectFit: 'cover', opacity: 0.6 }}
+                            />
+                        </div>
+                    )}
                 </div>
             ),
-            { width: WIDTH, height: HEIGHT, fonts: fontData ? [{ name: 'JetBrains Mono', data: fontData, style: 'normal', weight: 500 }] : [] }
+            { 
+                width: WIDTH, 
+                height: HEIGHT, 
+                fonts: fontData ? [{ name: 'JetBrains Mono', data: fontData, style: 'normal', weight: 500 }] : [],
+                headers: {
+                    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0',
+                }
+            }
         );
     } catch (e: any) {
         return new Response(`Error: ${e.message}`, { status: 500 });

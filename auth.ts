@@ -1,7 +1,10 @@
 import NextAuth from "next-auth";
 import Google from "next-auth/providers/google";
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import { prisma } from "@/lib/prisma";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  adapter: PrismaAdapter(prisma),
   providers: [
     Google({
       authorization: {
@@ -15,15 +18,10 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    async jwt({ token, account }) {
-      if (account) {
-        token.accessToken = account.access_token;
+    async session({ session, user }) {
+      if (session.user && user) {
+        session.user.id = user.id;
       }
-      return token;
-    },
-    async session({ session, token }) {
-      // @ts-ignore
-      session.accessToken = token.accessToken;
       return session;
     }
   }
