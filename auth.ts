@@ -17,7 +17,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       }
     }),
   ],
-  callbacks: {
+    callbacks: {
+    async signIn({ account }) {
+      if (account?.provider === "google" && account.refresh_token) {
+        // Forcefully update the database with the newest refresh token
+        // to prevent the "invalid_grant" error when Google limits are reached.
+        await prisma.account.updateMany({
+          where: {
+            provider: "google",
+            providerAccountId: account.providerAccountId,
+          },
+          data: {
+            refresh_token: account.refresh_token,
+            access_token: account.access_token,
+            expires_at: account.expires_at,
+          },
+        });
+      }
+      return true;
+    },
     async session({ session, user }) {
       if (session.user && user) {
         session.user.id = user.id;

@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
         let startObj = parseDate(startDateStr);
         let projectStartObj = new Date(startObj); // Used specifically for progress percentage
 
-        const goalMap: Record<string, any> = {};
+        const goalMap: Record<string, any[]> = {};
         const goalsList: any[] = [];
 
         if (userId) {
@@ -94,7 +94,8 @@ export async function GET(req: NextRequest) {
                     color: color,
                     position: task.position || ""
                 };
-                goalMap[dStr] = g;
+                if (!goalMap[dStr]) goalMap[dStr] = [];
+                goalMap[dStr].push(g);
                 goalsList.push(g);
             });
 
@@ -114,7 +115,8 @@ export async function GET(req: NextRequest) {
                     dateObj: parseDate(searchParams.get(`goal[${i}][goalDate]`) || ''),
                     color: decodeURIComponent(searchParams.get(`goal[${i}][goalColor]`) || THEME.primary),
                 };
-                goalMap[g.dateStr] = g;
+                if (!goalMap[g.dateStr]) goalMap[g.dateStr] = [];
+                goalMap[g.dateStr].push(g);
                 goalsList.push(g);
                 i++;
             }
@@ -199,7 +201,7 @@ export async function GET(req: NextRequest) {
                             <div key={wIdx} style={{ display: 'flex', gap: `${gap}px` }}>
                                 {week.map((day, dIdx) => {
                                     const isToday = day.dateStr === todayStr;
-                                    const goalMatch = goalMap[day.dateStr];
+                                    const goalMatches = goalMap[day.dateStr] || [];
                                     return (
                                         <div key={dIdx} style={{
                                             width: `${circleSize}px`, height: `${circleSize}px`,
@@ -212,12 +214,23 @@ export async function GET(req: NextRequest) {
                                             boxShadow: isToday ? `0 4px 12px ${THEME.primary}40` : 'none',
                                         }}>
                                             {day.dayNum}
-                                            {goalMatch && !isToday && (
+                                            {goalMatches.length > 0 && !isToday && (
                                                 <div style={{
-                                                    width: '16px', height: '16px', borderRadius: '50%',
-                                                    backgroundColor: goalMatch.color, position: 'absolute', bottom: '12px',
-                                                    display: 'flex' // Explicit flex for children
-                                                }} />
+                                                    display: 'flex', gap: '6px', position: 'absolute', bottom: '12px',
+                                                }}>
+                                                    {goalMatches.slice(0, 3).map((match, i) => (
+                                                        <div key={i} style={{
+                                                            width: '12px', height: '12px', borderRadius: '50%',
+                                                            backgroundColor: match.color
+                                                        }} />
+                                                    ))}
+                                                    {goalMatches.length > 3 && (
+                                                        <div style={{
+                                                            width: '12px', height: '12px', borderRadius: '50%',
+                                                            backgroundColor: THEME.muted
+                                                        }} />
+                                                    )}
+                                                </div>
                                             )}
                                         </div>
                                     );
